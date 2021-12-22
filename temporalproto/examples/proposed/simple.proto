@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package mycompany.simple;
+
+service Simple {
+  rpc SomeWorkflow1(SomeWorkflow1Request) returns (SomeWorkflow1Response) {
+    option (temporal.sdk.workflow) = {
+      // Optional:
+      // workflow_id_field: 'id'
+
+      query: 'SomeQuery1'
+      query: 'SomeQuery2'
+      signal: 'SomeSignal1'
+    };
+  }
+
+  rpc SomeActivity1(SomeActivity1Request) returns (SomeActivity1Response) {
+    option (temporal.sdk.activity) = {
+      default_options {
+        start_to_close_timeout: { seconds: 10 }
+      }
+    };
+  }
+
+  rpc SomeQuery1() returns (SomeQuery1Response) {
+    option (temporal.sdk.query) = { };
+  }
+
+  rpc SomeQuery2(SomeQuery2Request) returns (SomeQuery2Response) {
+    option (temporal.sdk.query) = { };
+  }
+
+  rpc SomeSignal1() returns () {
+    option (temporal.sdk.signal) = { };
+  }
+
+  rpc SomeSignal2(SomeSignal2Request) returns () {
+    option (temporal.sdk.signal) = { };
+  }
+
+  rpc SomeCall1() returns (SomeCall1Response) {
+    option (temporal.sdk.call) = { };
+  }
+
+  rpc SomeCall2() returns () {
+    option (temporal.sdk.call) = { };
+  }
+
+  rpc SomeCall3(SomeCall3Request) returns (SomeCall3Response) {
+    option (temporal.sdk.call) = { };
+  }
+}
+
+message SomeWorkflow1Request {
+}
