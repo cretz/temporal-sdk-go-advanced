@@ -7,6 +7,8 @@ service Simple {
     option (temporal.sdk.workflow) = {
       // Optional:
       // workflow_id_field: 'id'
+      // Optional:
+      // start_signal: 'whatever'
 
       query: 'SomeQuery1'
       query: 'SomeQuery2'
@@ -38,15 +40,8 @@ service Simple {
     option (temporal.sdk.signal) = { };
   }
 
-  rpc SomeCall1() returns (SomeCall1Response) {
-    option (temporal.sdk.call) = { };
-  }
-
-  rpc SomeCall2() returns () {
-    option (temporal.sdk.call) = { };
-  }
-
-  rpc SomeCall3(SomeCall3Request) returns (SomeCall3Response) {
+  // Request and response required
+  rpc SomeCall1(SomeCall1Request) returns (SomeCall1Response) {
     option (temporal.sdk.call) = { };
   }
 }

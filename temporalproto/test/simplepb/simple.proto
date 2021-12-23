@@ -1,0 +1,127 @@
+syntax = "proto3";
+
+option go_package = "github.com/cretz/temporal-sdk-go-advanced/temporalproto/test/simplepb";
+
+package mycompany.simple;
+
+import "google/protobuf/empty.proto";
+import "temporalpb/sdk.proto";
+
+service Simple {
+  rpc SomeWorkflow1(SomeWorkflow1Request) returns (SomeWorkflow1Response) {
+    option (temporal.sdk.workflow) = {
+      query: { ref: 'SomeQuery1' }
+      query: { ref: 'SomeQuery2' }
+      signal: { ref: 'SomeSignal1' }
+      signal: { ref: 'SomeSignal2' }
+      call: { ref: 'SomeCall1' }
+    };
+  }
+
+  rpc SomeWorkflow2(google.protobuf.Empty) returns (google.protobuf.Empty) {
+    option (temporal.sdk.workflow) = {
+      signal: { ref: 'SomeSignal1' }
+      signal_start: { ref: 'SomeSignal1' }
+    };
+  }
+
+  rpc SomeWorkflow3(SomeWorkflow3Request) returns (google.protobuf.Empty) {
+    option (temporal.sdk.workflow) = {
+      signal: { ref: 'SomeSignal2' }
+      signal_start: { ref: 'SomeSignal2' }
+      workflow_id_field: 'id'
+      default_options {
+        task_queue: 'my-task-queue'
+      }
+    };
+  }
+
+  rpc SomeActivity1(google.protobuf.Empty) returns (google.protobuf.Empty) {
+    option (temporal.sdk.activity) = { };
+  }
+
+  rpc SomeActivity2(SomeActivity2Request) returns (google.protobuf.Empty) {
+    option (temporal.sdk.activity) = {
+      default_options {
+        start_to_close_timeout: { seconds: 10 }
+      }
+    };
+  }
+
+  rpc SomeActivity3(SomeActivity3Request) returns (SomeActivity3Response) {
+    option (temporal.sdk.activity) = {
+      default_options {
+        start_to_close_timeout: { seconds: 10 }
+      }
+    };
+  }
+
+  rpc SomeQuery1(google.protobuf.Empty) returns (SomeQuery1Response) {
+    option (temporal.sdk.query) = { };
+  }
+
+  rpc SomeQuery2(SomeQuery2Request) returns (SomeQuery2Response) {
+    option (temporal.sdk.query) = { };
+  }
+
+  rpc SomeSignal1(google.protobuf.Empty) returns (google.protobuf.Empty) {
+    option (temporal.sdk.signal) = { };
+  }
+
+  rpc SomeSignal2(SomeSignal2Request) returns (google.protobuf.Empty) {
+    option (temporal.sdk.signal) = { };
+  }
+
+  rpc SomeCall1(SomeCall1Request) returns (SomeCall1Response) {
+    option (temporal.sdk.call) = { };
+  }
+}
+
+message SomeWorkflow1Request {
+  string request_val = 1;
+}
+
+message SomeWorkflow1Response {
+  string response_val = 1;
+}
+
+message SomeWorkflow3Request {
+  string id = 1;
+  string request_val = 2;
+}
+
+message SomeActivity2Request {
+  string request_val = 1;
+}
+
+message SomeActivity3Request {
+  string request_val = 1;
+}
+
+message SomeActivity3Response {
+  string response_val = 1;
+}
+
+message SomeQuery1Response {
+  string response_val = 1;
+}
+
+message SomeQuery2Request {
+  string request_val = 1;
+}
+
+message SomeQuery2Response {
+  string response_val = 1;
+}
+
+message SomeSignal2Request {
+  string request_val = 1;
+}
+
+message SomeCall1Request {
+  string request_val = 1;
+}
+
+message SomeCall1Response {
+  string response_val = 1;
+}
