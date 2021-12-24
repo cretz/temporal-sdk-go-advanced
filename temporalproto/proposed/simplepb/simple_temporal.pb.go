@@ -49,6 +49,7 @@ type WorkflowClient interface {
 
 	GetSomeWorkflow1(ctx context.Context, workflowID, runID string) (SomeWorkflow1Run, error)
 
+	// Foo
 	SomeQuery1(ctx context.Context, workflowID, runID string) (*SomeQuery1Response, error)
 	SomeQuery2(ctx context.Context, workflowID, runID string, req *SomeQuery2Request) (*SomeQuery2Response, error)
 	SomeSignal1(ctx context.Context, workflowID, runID string) error
@@ -56,16 +57,24 @@ type WorkflowClient interface {
 	SomeCall1(ctx context.Context, workflowID, runID string, req *SomeCall1Request) (*SomeCall1Response, error)
 }
 
-type workflowClient struct {
-	client              client.Client
-	callResponseHandler CallResponseHandler
-}
-
 type WorkflowClientOptions struct {
 	// Required
 	Client client.Client
 	// Must be present for calls to succeed
 	CallResponseHandler CallResponseHandler
+}
+
+type CallResponseHandler interface {
+	TaskQueue() string
+	PrepareCall(ctx context.Context) (id string, chOk <-chan interface{}, chErr <-chan error)
+	// Does not error if already added with same params. Only errors if ID field
+	// does not exist or the activity name is registered with different params.
+	AddResponseType(activityName string, typ reflect.Type, idField string) error
+}
+
+type workflowClient struct {
+	client              client.Client
+	callResponseHandler CallResponseHandler
 }
 
 func NewWorkflowClient(opts WorkflowClientOptions) WorkflowClient {
@@ -151,17 +160,9 @@ func (w *workflowClient) SomeCall1(ctx context.Context, workflowID, runID string
 	}
 }
 
-type CallResponseHandler interface {
-	TaskQueue() string
-	PrepareCall(ctx context.Context) (id string, chOk <-chan interface{}, chErr <-chan error)
-	// Does not error if already added with same params. Only errors if ID field
-	// does not exist or the activity name is registered with different params.
-	AddResponseType(activityName string, typ reflect.Type, idField string) error
-}
-
 type SomeWorkflow1Run interface {
 	ID() string
-	InitialRunID() string
+	RunID() string
 	Get(context.Context) (*SomeWorkflow1Response, error)
 	SomeQuery1(context.Context) (*SomeQuery1Response, error)
 	SomeQuery2(context.Context, *SomeQuery2Request) (*SomeQuery2Response, error)
@@ -180,7 +181,7 @@ func (r *someWorkflow1Run) ID() string {
 	return r.run.GetID()
 }
 
-func (r *someWorkflow1Run) InitialRunID() string {
+func (r *someWorkflow1Run) RunID() string {
 	return r.run.GetRunID()
 }
 
@@ -216,78 +217,88 @@ func (r *SomeCall1Request) ResponseInfo() (id, targetName, taskQueue string) {
 	return r.Id, SomeCall1ResponseName, r.ResponseTaskQueue
 }
 
-type workerImpl struct{ impl SomeWorkflow1Impl }
-
-func (w workerImpl) SomeWorkflow1(ctx workflow.Context, req *SomeWorkflow1Request) (*SomeWorkflow1Response, error) {
-	in := &SomeWorkflow1Input{Req: req}
-	in.Signal1.Channel = workflow.GetSignalChannel(ctx, SomeSignal1Name)
-	in.Signal2.Channel = workflow.GetSignalChannel(ctx, SomeSignal2Name)
-	in.SomeCall1.Channel = workflow.GetSignalChannel(ctx, SomeCall1SignalName)
-	if err := workflow.SetQueryHandler(ctx, SomeQuery1Name, w.impl.SomeQuery1); err != nil {
-		return nil, err
-	}
-	if err := workflow.SetQueryHandler(ctx, SomeQuery2Name, w.impl.SomeQuery2); err != nil {
-		return nil, err
-	}
-	return w.impl.Run(ctx, in)
-}
-
-func BuildSomeWorkflow1(impl SomeWorkflow1Impl) func(ctx workflow.Context, req *SomeWorkflow1Request) (*SomeWorkflow1Response, error) {
-	return workerImpl{impl}.SomeWorkflow1
-}
-
-func RegisterSomeWorkflow1(r worker.WorkflowRegistry, impl SomeWorkflow1Impl) {
-	r.RegisterWorkflowWithOptions(BuildSomeWorkflow1(impl), workflow.RegisterOptions{Name: SomeWorkflow1Name})
+type SomeWorkflow1Impl interface {
+	Run(workflow.Context) (*SomeWorkflow1Response, error)
+	SomeQuery1() (*SomeQuery1Response, error)
+	SomeQuery2(*SomeQuery2Request) (*SomeQuery1Response, error)
 }
 
 type SomeWorkflow1Input struct {
-	Req       *SomeWorkflow1Request
-	Signal1   SomeSignal1
-	Signal2   SomeSignal2
-	SomeCall1 SomeCall1
+	Req         *SomeWorkflow1Request
+	SomeSignal1 SomeSignal1
+	SomeSignal2 SomeSignal2
+	SomeCall1   SomeCall1
+}
+
+type someWorkflowWorker struct {
+	newImpl func(workflow.Context, *SomeWorkflow1Input) (SomeWorkflow1Impl, error)
+}
+
+func (w someWorkflowWorker) SomeWorkflow1(ctx workflow.Context, req *SomeWorkflow1Request) (*SomeWorkflow1Response, error) {
+	in := &SomeWorkflow1Input{Req: req}
+	in.SomeSignal1.Channel = workflow.GetSignalChannel(ctx, SomeSignal1Name)
+	in.SomeSignal2.Channel = workflow.GetSignalChannel(ctx, SomeSignal2Name)
+	in.SomeCall1.Channel = workflow.GetSignalChannel(ctx, SomeCall1SignalName)
+	impl, err := w.newImpl(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	if err := workflow.SetQueryHandler(ctx, SomeQuery1Name, impl.SomeQuery1); err != nil {
+		return nil, err
+	}
+	if err := workflow.SetQueryHandler(ctx, SomeQuery2Name, impl.SomeQuery2); err != nil {
+		return nil, err
+	}
+	return impl.Run(ctx)
+}
+
+func BuildSomeWorkflow1(newImpl func(workflow.Context, *SomeWorkflow1Input) (SomeWorkflow1Impl, error)) func(ctx workflow.Context, req *SomeWorkflow1Request) (*SomeWorkflow1Response, error) {
+	return someWorkflowWorker{newImpl}.SomeWorkflow1
+}
+
+func RegisterSomeWorkflow1(r worker.WorkflowRegistry, newImpl func(workflow.Context, *SomeWorkflow1Input) (SomeWorkflow1Impl, error)) {
+	r.RegisterWorkflowWithOptions(BuildSomeWorkflow1(newImpl), workflow.RegisterOptions{Name: SomeWorkflow1Name})
 }
 
 type SomeSignal1 struct{ Channel workflow.ReceiveChannel }
 
-func (s SomeSignal1) Receive(ctx workflow.Context) (stillOpen bool) {
-	return s.Channel.Receive(ctx, nil)
+func (s SomeSignal1) Receive(ctx workflow.Context) {
+	s.Channel.Receive(ctx, nil)
 }
 
-func (s SomeSignal1) ReceiveAsync() (received, stillOpen bool) {
-	return s.Channel.ReceiveAsyncWithMoreFlag(nil)
+func (s SomeSignal1) ReceiveAsync() (received bool) {
+	return s.Channel.ReceiveAsync(nil)
 }
 
-func (s SomeSignal1) Select(sel workflow.Selector, fn func(stillOpen bool)) workflow.Selector {
+func (s SomeSignal1) Select(sel workflow.Selector, fn func()) workflow.Selector {
 	return sel.AddReceive(s.Channel, func(workflow.ReceiveChannel, bool) {
-		_, stillOpen := s.ReceiveAsync()
-		fn(stillOpen)
+		s.ReceiveAsync()
+		if fn != nil {
+			fn()
+		}
 	})
 }
 
 type SomeSignal2 struct{ Channel workflow.ReceiveChannel }
 
-// Nil if channel closed
 func (s SomeSignal2) Receive(ctx workflow.Context) *SomeSignal2Request {
 	var resp SomeSignal2Request
-	if !s.Channel.Receive(ctx, &resp) {
+	s.Channel.Receive(ctx, &resp)
+	return &resp
+}
+
+// Nil if not received
+func (s SomeSignal2) ReceiveAsync() *SomeSignal2Request {
+	var resp SomeSignal2Request
+	if !s.Channel.ReceiveAsync(&resp) {
 		return nil
 	}
 	return &resp
 }
 
-// Nil if not there or channel closed, stillOpen as false if channel closed
-func (s SomeSignal2) ReceiveAsync() (req *SomeSignal2Request, stillOpen bool) {
-	var resp SomeSignal2Request
-	if ok, more := s.Channel.ReceiveAsyncWithMoreFlag(&resp); !ok || !more {
-		return nil, more
-	}
-	return &resp, true
-}
-
-// Nil if channel closed
 func (s SomeSignal2) Select(sel workflow.Selector, fn func(*SomeSignal2Request)) workflow.Selector {
 	return sel.AddReceive(s.Channel, func(workflow.ReceiveChannel, bool) {
-		req, _ := s.ReceiveAsync()
+		req := s.ReceiveAsync()
 		if fn != nil {
 			fn(req)
 		}
@@ -321,93 +332,16 @@ func (s SomeCall1) Select(sel workflow.Selector, fn func(req *SomeCall1Request))
 	})
 }
 
-func (s SomeCall1) Respond(ctx workflow.Context, req *SomeCall1Request, resp *SomeCall1Response) SomeCall1ResponseFuture {
+func (s SomeCall1) Respond(ctx workflow.Context, req *SomeCall1Request, resp *SomeCall1Response) workflow.Future {
 	id, targetName, taskQueue := req.ResponseInfo()
 	resp.Id = id
-	// If we have a response workflow ID, use that to send signal
-	var respFut SomeCall1ResponseFuture
 	if req.ResponseWorkflowID != "" {
-		respFut.Future = workflow.SignalExternalWorkflow(ctx, req.ResponseWorkflowID, "", targetName+"-"+req.Id, resp)
-	} else {
-		// Shallow copy options to set the task queue
-		opts := workflow.GetActivityOptions(ctx)
-		opts.TaskQueue = taskQueue
-		ctx = workflow.WithActivityOptions(ctx, opts)
-		respFut.Future = workflow.ExecuteActivity(ctx, targetName, resp)
+		return workflow.SignalExternalWorkflow(ctx, req.ResponseWorkflowID, "", targetName+"-"+req.Id, resp)
 	}
-	return respFut
-}
-
-type SomeCall1ResponseFuture struct{ Future workflow.Future }
-
-func (f SomeCall1ResponseFuture) Wait(ctx workflow.Context) error {
-	return f.Future.Get(ctx, nil)
-}
-
-// Func can be nil
-func (f SomeCall1ResponseFuture) Select(sel workflow.Selector, fn func(SomeCall1ResponseFuture)) workflow.Selector {
-	return sel.AddFuture(f.Future, func(workflow.Future) {
-		if fn != nil {
-			fn(f)
-		}
-	})
-}
-
-type SomeWorkflow1Impl interface {
-	Run(workflow.Context, *SomeWorkflow1Input) (*SomeWorkflow1Response, error)
-	SomeQuery1() (*SomeQuery1Response, error)
-	SomeQuery2(*SomeQuery2Request) (*SomeQuery1Response, error)
-}
-
-// Nil options uses ones in context
-func SomeActivity1(ctx workflow.Context, opts *workflow.ActivityOptions, req *SomeActivity1Request) SomeActivity1Future {
-	if opts != nil {
-		ctx = workflow.WithActivityOptions(ctx, *opts)
-	}
-	return SomeActivity1Future{workflow.ExecuteActivity(ctx, SomeActivity1Name, req)}
-}
-
-// Nil options uses ones in context
-func SomeActivity1Local(
-	ctx workflow.Context,
-	opts *workflow.LocalActivityOptions,
-	fn func(context.Context, *SomeActivity1Request) (*SomeActivity1Response, error),
-	req *SomeActivity1Request,
-) SomeActivity1Future {
-	if opts != nil {
-		ctx = workflow.WithLocalActivityOptions(ctx, *opts)
-	}
-	return SomeActivity1Future{workflow.ExecuteLocalActivity(ctx, fn, req)}
-}
-
-func RegisterSomeActivity1(r worker.ActivityRegistry, impl func(context.Context, *SomeActivity1Request) (*SomeActivity1Response, error)) {
-	r.RegisterActivityWithOptions(impl, activity.RegisterOptions{Name: SomeActivity1Name})
-}
-
-type ActivitiesImpl interface {
-	SomeActivity1(context.Context, *SomeActivity1Request) (*SomeActivity1Response, error)
-}
-
-func RegisterActivities(r worker.ActivityRegistry, a ActivitiesImpl) {
-	RegisterSomeActivity1(r, a.SomeActivity1)
-}
-
-type SomeActivity1Future struct{ Future workflow.Future }
-
-func (f SomeActivity1Future) Get(ctx workflow.Context) (*SomeActivity1Response, error) {
-	var resp SomeActivity1Response
-	if err := f.Future.Get(ctx, &resp); err != nil {
-		return nil, err
-	}
-	return &resp, nil
-}
-
-func (f SomeActivity1Future) Select(sel workflow.Selector, fn func(SomeActivity1Future)) workflow.Selector {
-	return sel.AddFuture(f.Future, func(workflow.Future) {
-		if fn != nil {
-			fn(f)
-		}
-	})
+	opts := workflow.GetActivityOptions(ctx)
+	opts.TaskQueue = taskQueue
+	ctx = workflow.WithActivityOptions(ctx, opts)
+	return workflow.ExecuteActivity(ctx, targetName, resp)
 }
 
 // Opts taken from context if not given
@@ -417,9 +351,11 @@ func SomeWorkflow1Child(
 	req *SomeWorkflow1Request,
 ) SomeWorkflow1ChildRun {
 	// TODO(cretz): Use workflow_id field if present
-	if opts != nil {
-		ctx = workflow.WithChildOptions(ctx, *opts)
+	if opts == nil {
+		ctxOpts := workflow.GetChildWorkflowOptions(ctx)
+		opts = &ctxOpts
 	}
+	ctx = workflow.WithChildOptions(ctx, *opts)
 	return SomeWorkflow1ChildRun{workflow.ExecuteChildWorkflow(ctx, SomeWorkflow1Name, req)}
 }
 
@@ -480,6 +416,28 @@ func (r SomeWorkflow1ChildRun) SomeCall1(ctx workflow.Context, req *SomeCall1Req
 	return resp, nil
 }
 
+func SomeSignal1External(ctx workflow.Context, workflowID, runID string) workflow.Future {
+	return workflow.SignalExternalWorkflow(ctx, workflowID, runID, SomeSignal1Name, nil)
+}
+
+func SomeSignal2External(ctx workflow.Context, workflowID, runID string, req *SomeSignal2Request) workflow.Future {
+	return workflow.SignalExternalWorkflow(ctx, workflowID, runID, SomeSignal2Name, req)
+}
+
+func SomeCall1External(ctx workflow.Context, workflowID, runID string, req *SomeCall1Request) (SomeCall1ResponseExternal, error) {
+	// Require request ID
+	var resp SomeCall1ResponseExternal
+	if req.Id == "" {
+		return resp, fmt.Errorf("missing request ID")
+	} else if req.ResponseTaskQueue != "" {
+		return resp, fmt.Errorf("cannot have task queue for external")
+	}
+	req.ResponseWorkflowID = workflow.GetInfo(ctx).WorkflowExecution.ID
+	resp.Channel = workflow.GetSignalChannel(ctx, SomeCall1ResponseName+"-"+req.Id)
+	resp.Future = workflow.SignalExternalWorkflow(ctx, workflowID, runID, SomeCall1SignalName, req)
+	return resp, nil
+}
+
 type SomeCall1ResponseExternal struct {
 	Future  workflow.Future
 	Channel workflow.ReceiveChannel
@@ -523,24 +481,57 @@ func (s *SomeCall1ResponseExternal) Select(sel workflow.Selector, fn func(req *S
 	})
 }
 
-func SomeSignal1External(ctx workflow.Context, workflowID, runID string) workflow.Future {
-	return workflow.SignalExternalWorkflow(ctx, workflowID, runID, SomeSignal1Name, nil)
+type ActivitiesImpl interface {
+	SomeActivity1(context.Context, *SomeActivity1Request) (*SomeActivity1Response, error)
 }
 
-func SomeSignal2External(ctx workflow.Context, workflowID, runID string, req *SomeSignal2Request) workflow.Future {
-	return workflow.SignalExternalWorkflow(ctx, workflowID, runID, SomeSignal2Name, req)
+func RegisterActivities(r worker.ActivityRegistry, a ActivitiesImpl) {
+	RegisterSomeActivity1(r, a.SomeActivity1)
 }
 
-func SomeCall1External(ctx workflow.Context, workflowID, runID string, req *SomeCall1Request) (SomeCall1ResponseExternal, error) {
-	// Require request ID
-	var resp SomeCall1ResponseExternal
-	if req.Id == "" {
-		return resp, fmt.Errorf("missing request ID")
-	} else if req.ResponseTaskQueue != "" {
-		return resp, fmt.Errorf("cannot have task queue for external")
+func RegisterSomeActivity1(r worker.ActivityRegistry, impl func(context.Context, *SomeActivity1Request) (*SomeActivity1Response, error)) {
+	r.RegisterActivityWithOptions(impl, activity.RegisterOptions{Name: SomeActivity1Name})
+}
+
+// Nil options uses ones in context
+func SomeActivity1(ctx workflow.Context, opts *workflow.ActivityOptions, req *SomeActivity1Request) SomeActivity1Future {
+	if opts == nil {
+		ctxOpts := workflow.GetActivityOptions(ctx)
+		opts = &ctxOpts
 	}
-	req.ResponseWorkflowID = workflow.GetInfo(ctx).WorkflowExecution.ID
-	resp.Channel = workflow.GetSignalChannel(ctx, SomeCall1ResponseName+"-"+req.Id)
-	resp.Future = workflow.SignalExternalWorkflow(ctx, workflowID, runID, SomeCall1SignalName, req)
-	return resp, nil
+	ctx = workflow.WithActivityOptions(ctx, *opts)
+	return SomeActivity1Future{workflow.ExecuteActivity(ctx, SomeActivity1Name, req)}
+}
+
+// Nil options uses ones in context
+func SomeActivity1Local(
+	ctx workflow.Context,
+	opts *workflow.LocalActivityOptions,
+	fn func(context.Context, *SomeActivity1Request) (*SomeActivity1Response, error),
+	req *SomeActivity1Request,
+) SomeActivity1Future {
+	if opts == nil {
+		ctxOpts := workflow.GetLocalActivityOptions(ctx)
+		opts = &ctxOpts
+	}
+	ctx = workflow.WithLocalActivityOptions(ctx, *opts)
+	return SomeActivity1Future{workflow.ExecuteLocalActivity(ctx, fn, req)}
+}
+
+type SomeActivity1Future struct{ Future workflow.Future }
+
+func (f SomeActivity1Future) Get(ctx workflow.Context) (*SomeActivity1Response, error) {
+	var resp SomeActivity1Response
+	if err := f.Future.Get(ctx, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (f SomeActivity1Future) Select(sel workflow.Selector, fn func(SomeActivity1Future)) workflow.Selector {
+	return sel.AddFuture(f.Future, func(workflow.Future) {
+		if fn != nil {
+			fn(f)
+		}
+	})
 }

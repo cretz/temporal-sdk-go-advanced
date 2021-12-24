@@ -43,6 +43,7 @@ message WorkflowOptions {
 
   message StartOptions {
     string task_queue = 1;
+    // TODO(cretz): retry_policy and others
   }
 }
 
@@ -50,7 +51,12 @@ message ActivityOptions {
   StartOptions default_options = 1;
 
   message StartOptions {
-    google.protobuf.Duration start_to_close_timeout = 1;
+    string task_queue = 1;
+    google.protobuf.Duration schedule_to_close_timeout = 2;
+    google.protobuf.Duration schedule_to_start_timeout = 3;
+    google.protobuf.Duration start_to_close_timeout = 4;
+    google.protobuf.Duration heartbeat_timeout = 5;
+    // TODO(cretz): retry_policy and others
   }
 }
 

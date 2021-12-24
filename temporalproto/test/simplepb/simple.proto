@@ -119,9 +119,13 @@ message SomeSignal2Request {
 }
 
 message SomeCall1Request {
-  string request_val = 1;
+  string id = 1;
+  string response_task_queue = 2;
+  string response_workflow_id = 3;
+  string request_val = 4;
 }
 
 message SomeCall1Response {
-  string response_val = 1;
+  string id = 1;
+  string response_val = 2;
 }
