@@ -107,8 +107,12 @@ func (g *gen) genWorkflowWorker(w *workflowMethod) {
 		g.P("if err != nil { return nil, err }")
 	}
 	for _, q := range w.queries {
+		returnErr := "return err"
+		if !isEmpty(w.Output) {
+			returnErr = "return nil, err"
+		}
 		g.P("if err := ", g.QualifiedGoIdent(workflowPackage.Ident("SetQueryHandler")), "(ctx, ", g.prefix(),
-			q.GoName, "Name, impl.", q.GoName, "); err != nil { return nil, err }")
+			q.GoName, "Name, impl.", q.GoName, "); err != nil { ", returnErr, " }")
 	}
 	g.P("return impl.Run(ctx)")
 	g.P("}")

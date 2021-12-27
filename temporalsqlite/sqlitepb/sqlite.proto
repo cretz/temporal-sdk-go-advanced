@@ -1,0 +1,115 @@
+syntax = "proto3";
+
+option go_package = "github.com/cretz/temporal-sdk-go-advanced/temporalsqlite/sqlitepb";
+
+package temporal.sdk.sqlite;
+
+import "google/protobuf/empty.proto";
+import "temporalpb/sdk.proto";
+
+service Sqlite {
+  rpc Sqlite(SqliteOptions) returns (google.protobuf.Empty) {
+    option (temporal.sdk.workflow) = {
+      query: { ref: 'Query' }
+      signal: { ref: 'Update' }
+      call: { ref: 'Exec' }
+      query: { ref: 'Serialize' }
+    };
+  }
+
+  rpc Query(QueryRequest) returns (QueryResponse) {
+    option (temporal.sdk.query) = { };
+  }
+
+  // Errors are silently logged
+  rpc Update(UpdateRequest) returns (google.protobuf.Empty) {
+    option (temporal.sdk.signal) = { };
+  }
+
+  rpc Exec(ExecRequest) returns (ExecResponse) {
+    option (temporal.sdk.call) = { };
+  }
+
+  rpc Serialize(google.protobuf.Empty) returns (SerializeResponse) {
+    option (temporal.sdk.query) = { };
+  }
+}
+
+message SqliteOptions {
+  // If empty, considered a brand new database
+  bytes serialized = 1;
+
+  // Default is 5000
+  uint32 statements_until_continue_as_new = 2;
+}
+
+message Value {
+  oneof kind {
+    bool null_value = 1;
+    int64 int_value = 2;
+    double float_value = 3;
+    string string_value = 4;
+    bytes bytes_value = 5;
+  }
+}
+
+message Stmt {
+  string sql = 1;
+  // Note: indexed parameters start at 1
+  map<uint32, Value> indexed_params = 2;
+  map<string, Value> named_params = 3;
+}
+
+message StmtResult {
+  repeated Column columns = 1;
+  repeated Row rows = 2;
+
+  message Column {
+    string name = 1;
+  }
+
+  message Row {
+    repeated Value values = 1;
+  }
+}
+
+message StmtError {
+  int64 code = 1;
+  string message = 2;
+}
+
+message QueryRequest {
+  Stmt stmt = 1;
+}
+
+message QueryResponse {
+  oneof response {
+    StmtResult result = 1;
+    StmtError error = 2;
+  }
+}
+
+message UpdateRequest {
+  Stmt stmt = 1;
+}
+
+message ExecRequest {
+  Stmt stmt = 1;
+
+  string id = 2;
+  string response_task_queue = 3;
+  string response_workflow_id = 4;
+}
+
+message ExecResponse {
+  oneof response {
+    StmtResult result = 1;
+    StmtError error = 2;
+  }
+
+  string id = 3;
+}
+
+message SerializeResponse {
+  bytes serialized = 1;
+}
