@@ -5,6 +5,9 @@ go 1.17
 require (
 	github.com/DataDog/temporalite v0.0.0-20211222162055-5d2482fff08a
 	github.com/cretz/temporal-sdk-go-advanced/temporalproto v0.0.0-00010101000000-000000000000
+	github.com/cretz/temporal-sdk-go-advanced/temporalutil v0.0.0-00010101000000-000000000000
+	github.com/google/uuid v1.3.0
+	github.com/stretchr/testify v1.7.0
 	go.temporal.io/sdk v1.12.0
 	google.golang.org/protobuf v1.27.1
 )
@@ -32,7 +35,6 @@ require (
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/go-cmp v0.5.6 // indirect
-	github.com/google/uuid v1.3.0 // indirect
 	github.com/googleapis/gax-go/v2 v2.1.1 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0 // indirect
 	github.com/hailocab/go-hostpool v0.0.0-20160125115350-e80d13ce29ed // indirect
@@ -58,7 +60,6 @@ require (
 	github.com/robfig/cron v1.2.0 // indirect
 	github.com/sirupsen/logrus v1.8.1 // indirect
 	github.com/stretchr/objx v0.3.0 // indirect
-	github.com/stretchr/testify v1.7.0 // indirect
 	github.com/temporalio/ringpop-go v0.0.0-20211012191444-6f91b5915e95 // indirect
 	github.com/twmb/murmur3 v1.1.6 // indirect
 	github.com/uber-common/bark v1.3.0 // indirect
@@ -102,5 +103,6 @@ require (
 replace (
 	github.com/cactus/go-statsd-client => github.com/cactus/go-statsd-client v3.2.1+incompatible
 	github.com/cretz/temporal-sdk-go-advanced/temporalproto => ../
+	github.com/cretz/temporal-sdk-go-advanced/temporalutil => ../../temporalutil
 	go.temporal.io/sdk => go.temporal.io/sdk v1.11.1
 )

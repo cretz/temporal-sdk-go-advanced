@@ -212,7 +212,11 @@ func (g *gen) genCall(c *callMethod) {
 	g.P("})")
 	g.P("}")
 	g.P()
-	g.P("func (s ", g.prefix(), c.GoName, ") Respond(ctx ", g.workflowContext(), ", req *",
+	g.P("// Respond sends a response. Activity options not used if request received via")
+	g.P("// another workflow. If activity options needed and not present, they are taken")
+	g.P("// from the context.")
+	g.P("func (s ", g.prefix(), c.GoName, ") Respond(ctx ", g.workflowContext(), ", opts *",
+		g.QualifiedGoIdent(workflowPackage.Ident("ActivityOptions")), ", req *",
 		g.QualifiedGoIdent(c.Input.GoIdent), ", resp *", g.QualifiedGoIdent(c.Output.GoIdent), ") ",
 		g.QualifiedGoIdent(workflowPackage.Ident("Future")), " {")
 	g.P("resp.", c.outputIDField.GoName, " = req.", c.inputIDField.GoName)
@@ -228,9 +232,10 @@ func (g *gen) genCall(c *callMethod) {
 		g.P("}")
 	}
 	if c.inputResponseTaskQueueField != nil {
-		g.P("opts := ", g.QualifiedGoIdent(workflowPackage.Ident("GetActivityOptions")), "(ctx)")
-		g.P("opts.TaskQueue = req.", c.inputResponseTaskQueueField.GoName)
-		g.P("ctx = ", g.QualifiedGoIdent(workflowPackage.Ident("WithActivityOptions")), "(ctx, opts)")
+		g.P("newOpts := ", g.QualifiedGoIdent(workflowPackage.Ident("GetActivityOptions")), "(ctx)")
+		g.P("if opts != nil { newOpts = *opts }")
+		g.P("newOpts.TaskQueue = req.", c.inputResponseTaskQueueField.GoName)
+		g.P("ctx = ", g.QualifiedGoIdent(workflowPackage.Ident("WithActivityOptions")), "(ctx, newOpts)")
 		g.P("return ", g.QualifiedGoIdent(workflowPackage.Ident("ExecuteActivity")), "(ctx, ",
 			g.prefix(), c.GoName, "ResponseName, resp)")
 	}

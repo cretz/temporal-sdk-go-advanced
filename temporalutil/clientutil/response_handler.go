@@ -1,4 +1,4 @@
-package clientreq
+package clientutil
 
 import (
 	"context"
@@ -12,25 +12,25 @@ import (
 	"go.temporal.io/sdk/worker"
 )
 
-type HandlerOptions struct {
+type CallResponseHandlerOptions struct {
 	TaskQueue string
 	Worker    worker.Worker
 }
 
-type Handler struct {
+type CallResponseHandler struct {
 	taskQueue           string
 	worker              worker.Worker
 	pendingRequests     map[string]chan<- interface{}
 	pendingRequestsLock sync.RWMutex
 }
 
-func NewHandler(opts HandlerOptions) (*Handler, error) {
+func NewCallResponseHandler(opts CallResponseHandlerOptions) (*CallResponseHandler, error) {
 	if opts.TaskQueue == "" {
 		return nil, fmt.Errorf("missing task queue")
 	} else if opts.Worker == nil {
 		return nil, fmt.Errorf("missing worker")
 	}
-	return &Handler{
+	return &CallResponseHandler{
 		taskQueue:       opts.TaskQueue,
 		worker:          opts.Worker,
 		pendingRequests: map[string]chan<- interface{}{},
@@ -40,11 +40,11 @@ func NewHandler(opts HandlerOptions) (*Handler, error) {
 var contextType = reflect.TypeOf((*context.Context)(nil)).Elem()
 var errorType = reflect.TypeOf((*error)(nil)).Elem()
 
-func (h *Handler) TaskQueue() string { return h.taskQueue }
+func (c *CallResponseHandler) TaskQueue() string { return c.taskQueue }
 
-func (h *Handler) Call(
+func (c *CallResponseHandler) Call(
 	ctx context.Context,
-	c client.Client,
+	cl client.Client,
 	workflowID string,
 	runID string,
 	signalName string,
@@ -52,8 +52,8 @@ func (h *Handler) Call(
 ) (interface{}, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	id, okCh, errCh := h.PrepareCall(ctx)
-	if err := c.SignalWorkflow(ctx, workflowID, runID, signalName, newReq(id)); err != nil {
+	id, okCh, errCh := c.PrepareCall(ctx)
+	if err := cl.SignalWorkflow(ctx, workflowID, runID, signalName, newReq(id)); err != nil {
 		return nil, err
 	}
 	select {
@@ -66,7 +66,7 @@ func (h *Handler) Call(
 	}
 }
 
-func (h *Handler) PrepareCall(ctx context.Context) (id string, chOk <-chan interface{}, chErr <-chan error) {
+func (c *CallResponseHandler) PrepareCall(ctx context.Context) (id string, chOk <-chan interface{}, chErr <-chan error) {
 	// Create ID and result channels
 	id = uuid.NewString()
 	okCh := make(chan interface{}, 1)
@@ -74,17 +74,17 @@ func (h *Handler) PrepareCall(ctx context.Context) (id string, chOk <-chan inter
 
 	// Add response channel
 	respCh := make(chan interface{}, 1)
-	h.pendingRequestsLock.Lock()
-	h.pendingRequests[id] = respCh
-	h.pendingRequestsLock.Unlock()
+	c.pendingRequestsLock.Lock()
+	c.pendingRequests[id] = respCh
+	c.pendingRequestsLock.Unlock()
 
 	// Listen async
 	go func() {
 		// Remove when done
 		defer func() {
-			h.pendingRequestsLock.Lock()
-			defer h.pendingRequestsLock.Unlock()
-			delete(h.pendingRequests, id)
+			c.pendingRequestsLock.Lock()
+			defer c.pendingRequestsLock.Unlock()
+			delete(c.pendingRequests, id)
 		}()
 
 		// Wait for response or context done
@@ -99,7 +99,7 @@ func (h *Handler) PrepareCall(ctx context.Context) (id string, chOk <-chan inter
 	return id, okCh, errCh
 }
 
-func (h *Handler) AddResponseType(activityName string, typ reflect.Type, idField string) error {
+func (c *CallResponseHandler) AddResponseType(activityName string, typ reflect.Type, idField string) error {
 	// Check type and field
 	structTyp := typ
 	if typ.Kind() == reflect.Ptr {
@@ -114,29 +114,33 @@ func (h *Handler) AddResponseType(activityName string, typ reflect.Type, idField
 	// Make a dynamic func accepting context + type and returning error
 	fnVal := reflect.MakeFunc(
 		reflect.FuncOf([]reflect.Type{contextType, typ}, []reflect.Type{errorType}, false),
-		func(args []reflect.Value) (results []reflect.Value) {
-			return []reflect.Value{reflect.ValueOf(h.onResponse(args[1], idField))}
+		func(args []reflect.Value) []reflect.Value {
+			err := c.onResponse(args[1], idField)
+			if err == nil {
+				return []reflect.Value{reflect.Zero(errorType)}
+			}
+			return []reflect.Value{reflect.ValueOf(err)}
 		},
 	)
-	h.worker.RegisterActivityWithOptions(fnVal.Interface(), activity.RegisterOptions{
+	c.worker.RegisterActivityWithOptions(fnVal.Interface(), activity.RegisterOptions{
 		Name:                          activityName,
 		DisableAlreadyRegisteredCheck: true,
 	})
 	return nil
 }
 
-func (h *Handler) onResponse(val reflect.Value, idField string) error {
+func (c *CallResponseHandler) onResponse(val reflect.Value, idField string) error {
 	// Extract ID
 	structVal := val
 	if structVal.Kind() == reflect.Ptr {
 		structVal = val.Elem()
 	}
-	id := val.FieldByName(idField).String()
+	id := structVal.FieldByName(idField).String()
 
 	// Get the channel to respond to
-	h.pendingRequestsLock.RLock()
-	respCh := h.pendingRequests[id]
-	h.pendingRequestsLock.RUnlock()
+	c.pendingRequestsLock.RLock()
+	respCh := c.pendingRequests[id]
+	c.pendingRequestsLock.RUnlock()
 	// We choose not to log or error if a response is not pending because it is
 	// normal behavior for a requester to have closed the context and stop waiting
 	if respCh == nil {

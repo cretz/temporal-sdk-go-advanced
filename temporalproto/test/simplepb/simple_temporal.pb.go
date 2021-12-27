@@ -29,29 +29,38 @@ const (
 )
 
 type Client interface {
+
+	// SomeWorkflow1 does some workflow thing.
 	ExecuteSomeWorkflow1(ctx context.Context, opts *client.StartWorkflowOptions, req *SomeWorkflow1Request) (SomeWorkflow1Run, error)
 
 	// GetSomeWorkflow1 returns an existing run started by ExecuteSomeWorkflow1.
 	GetSomeWorkflow1(ctx context.Context, workflowID, runID string) (SomeWorkflow1Run, error)
 
+	// SomeWorkflow2 does some workflow thing.
 	ExecuteSomeWorkflow2(ctx context.Context, opts *client.StartWorkflowOptions, signalStart bool) (SomeWorkflow2Run, error)
 
 	// GetSomeWorkflow2 returns an existing run started by ExecuteSomeWorkflow2.
 	GetSomeWorkflow2(ctx context.Context, workflowID, runID string) (SomeWorkflow2Run, error)
 
+	// SomeWorkflow3 does some workflow thing.
 	ExecuteSomeWorkflow3(ctx context.Context, opts *client.StartWorkflowOptions, req *SomeWorkflow3Request, signalStart *SomeSignal2Request) (SomeWorkflow3Run, error)
 
 	// GetSomeWorkflow3 returns an existing run started by ExecuteSomeWorkflow3.
 	GetSomeWorkflow3(ctx context.Context, workflowID, runID string) (SomeWorkflow3Run, error)
 
+	// SomeQuery1 queries some thing.
 	SomeQuery1(ctx context.Context, workflowID, runID string) (*SomeQuery1Response, error)
 
+	// SomeQuery2 queries some thing.
 	SomeQuery2(ctx context.Context, workflowID, runID string, req *SomeQuery2Request) (*SomeQuery2Response, error)
 
+	// SomeSignal1 is a signal.
 	SomeSignal1(ctx context.Context, workflowID, runID string) error
 
+	// SomeSignal2 is a signal.
 	SomeSignal2(ctx context.Context, workflowID, runID string, req *SomeSignal2Request) error
 
+	// SomeCall1 is a call.
 	SomeCall1(ctx context.Context, workflowID, runID string, req *SomeCall1Request) (*SomeCall1Response, error)
 }
 
@@ -219,14 +228,19 @@ type SomeWorkflow1Run interface {
 	// Get returns the completed workflow value, waiting if necessary.
 	Get(ctx context.Context) (*SomeWorkflow1Response, error)
 
+	// SomeQuery1 queries some thing.
 	SomeQuery1(ctx context.Context) (*SomeQuery1Response, error)
 
+	// SomeQuery2 queries some thing.
 	SomeQuery2(ctx context.Context, req *SomeQuery2Request) (*SomeQuery2Response, error)
 
+	// SomeSignal1 is a signal.
 	SomeSignal1(ctx context.Context) error
 
+	// SomeSignal2 is a signal.
 	SomeSignal2(ctx context.Context, req *SomeSignal2Request) error
 
+	// SomeCall1 is a call.
 	SomeCall1(ctx context.Context, req *SomeCall1Request) (*SomeCall1Response, error)
 }
 
@@ -278,6 +292,7 @@ type SomeWorkflow2Run interface {
 	// Get returns the completed workflow value, waiting if necessary.
 	Get(ctx context.Context) error
 
+	// SomeSignal1 is a signal.
 	SomeSignal1(ctx context.Context) error
 }
 
@@ -309,6 +324,7 @@ type SomeWorkflow3Run interface {
 	// Get returns the completed workflow value, waiting if necessary.
 	Get(ctx context.Context) error
 
+	// SomeSignal2 is a signal.
 	SomeSignal2(ctx context.Context, req *SomeSignal2Request) error
 }
 
@@ -329,6 +345,7 @@ func (r *someWorkflow3Run) SomeSignal2(ctx context.Context, req *SomeSignal2Requ
 	return r.client.SomeSignal2(ctx, r.ID(), "", req)
 }
 
+// SomeWorkflow1 does some workflow thing.
 type SomeWorkflow1Impl interface {
 	Run(workflow.Context) (*SomeWorkflow1Response, error)
 
@@ -377,6 +394,7 @@ func RegisterSomeWorkflow1(r worker.WorkflowRegistry, newImpl func(workflow.Cont
 	r.RegisterWorkflowWithOptions(BuildSomeWorkflow1(newImpl), workflow.RegisterOptions{Name: SomeWorkflow1Name})
 }
 
+// SomeWorkflow2 does some workflow thing.
 type SomeWorkflow2Impl interface {
 	Run(workflow.Context) error
 }
@@ -410,6 +428,7 @@ func RegisterSomeWorkflow2(r worker.WorkflowRegistry, newImpl func(workflow.Cont
 	r.RegisterWorkflowWithOptions(BuildSomeWorkflow2(newImpl), workflow.RegisterOptions{Name: SomeWorkflow2Name})
 }
 
+// SomeWorkflow3 does some workflow thing.
 type SomeWorkflow3Impl interface {
 	Run(workflow.Context) error
 }
@@ -444,6 +463,7 @@ func RegisterSomeWorkflow3(r worker.WorkflowRegistry, newImpl func(workflow.Cont
 	r.RegisterWorkflowWithOptions(BuildSomeWorkflow3(newImpl), workflow.RegisterOptions{Name: SomeWorkflow3Name})
 }
 
+// SomeSignal1 is a signal.
 type SomeSignal1 struct{ Channel workflow.ReceiveChannel }
 
 // Receive blocks until signal is received.
@@ -466,6 +486,7 @@ func (s SomeSignal1) Select(sel workflow.Selector, fn func()) workflow.Selector 
 	})
 }
 
+// SomeSignal2 is a signal.
 type SomeSignal2 struct{ Channel workflow.ReceiveChannel }
 
 // Receive blocks until signal is received.
@@ -494,6 +515,7 @@ func (s SomeSignal2) Select(sel workflow.Selector, fn func(*SomeSignal2Request))
 	})
 }
 
+// SomeCall1 is a call.
 type SomeCall1 struct{ Channel workflow.ReceiveChannel }
 
 // Receive blocks until call is received.
@@ -522,14 +544,20 @@ func (s SomeCall1) Select(sel workflow.Selector, fn func(*SomeCall1Request)) wor
 	})
 }
 
-func (s SomeCall1) Respond(ctx workflow.Context, req *SomeCall1Request, resp *SomeCall1Response) workflow.Future {
+// Respond sends a response. Activity options not used if request received via
+// another workflow. If activity options needed and not present, they are taken
+// from the context.
+func (s SomeCall1) Respond(ctx workflow.Context, opts *workflow.ActivityOptions, req *SomeCall1Request, resp *SomeCall1Response) workflow.Future {
 	resp.Id = req.Id
 	if req.ResponseWorkflowId != "" {
 		return workflow.SignalExternalWorkflow(ctx, req.ResponseWorkflowId, "", SomeCall1ResponseName+"-"+req.Id, resp)
 	}
-	opts := workflow.GetActivityOptions(ctx)
-	opts.TaskQueue = req.ResponseTaskQueue
-	ctx = workflow.WithActivityOptions(ctx, opts)
+	newOpts := workflow.GetActivityOptions(ctx)
+	if opts != nil {
+		newOpts = *opts
+	}
+	newOpts.TaskQueue = req.ResponseTaskQueue
+	ctx = workflow.WithActivityOptions(ctx, newOpts)
 	return workflow.ExecuteActivity(ctx, SomeCall1ResponseName, resp)
 }
 
@@ -583,14 +611,17 @@ func (r SomeWorkflow1ChildRun) Select(sel workflow.Selector, fn func(SomeWorkflo
 	})
 }
 
+// SomeSignal1 is a signal.
 func (r SomeWorkflow1ChildRun) SomeSignal1(ctx workflow.Context) workflow.Future {
 	return r.Future.SignalChildWorkflow(ctx, SomeSignal1Name, nil)
 }
 
+// SomeSignal2 is a signal.
 func (r SomeWorkflow1ChildRun) SomeSignal2(ctx workflow.Context, req *SomeSignal2Request) workflow.Future {
 	return r.Future.SignalChildWorkflow(ctx, SomeSignal2Name, req)
 }
 
+// SomeCall1 is a call.
 func (r SomeWorkflow1ChildRun) SomeCall1(ctx workflow.Context, req *SomeCall1Request) (SomeCall1ResponseExternal, error) {
 	var resp SomeCall1ResponseExternal
 	if req.Id == "" {
@@ -651,6 +682,7 @@ func (r SomeWorkflow2ChildRun) Select(sel workflow.Selector, fn func(SomeWorkflo
 	})
 }
 
+// SomeSignal1 is a signal.
 func (r SomeWorkflow2ChildRun) SomeSignal1(ctx workflow.Context) workflow.Future {
 	return r.Future.SignalChildWorkflow(ctx, SomeSignal1Name, nil)
 }
@@ -704,18 +736,22 @@ func (r SomeWorkflow3ChildRun) Select(sel workflow.Selector, fn func(SomeWorkflo
 	})
 }
 
+// SomeSignal2 is a signal.
 func (r SomeWorkflow3ChildRun) SomeSignal2(ctx workflow.Context, req *SomeSignal2Request) workflow.Future {
 	return r.Future.SignalChildWorkflow(ctx, SomeSignal2Name, req)
 }
 
+// SomeSignal1 is a signal.
 func SomeSignal1External(ctx workflow.Context, workflowID, runID string) workflow.Future {
 	return workflow.SignalExternalWorkflow(ctx, workflowID, runID, SomeSignal1Name, nil)
 }
 
+// SomeSignal2 is a signal.
 func SomeSignal2External(ctx workflow.Context, workflowID, runID string, req *SomeSignal2Request) workflow.Future {
 	return workflow.SignalExternalWorkflow(ctx, workflowID, runID, SomeSignal2Name, req)
 }
 
+// SomeCall1 is a call.
 func SomeCall1External(ctx workflow.Context, workflowID, runID string, req *SomeCall1Request) (SomeCall1ResponseExternal, error) {
 	var resp SomeCall1ResponseExternal
 	if req.Id == "" {
@@ -778,10 +814,14 @@ func (e SomeCall1ResponseExternal) Select(sel workflow.Selector, fn func(*SomeCa
 
 // ActivitiesImpl is an interface for activity implementations.
 type ActivitiesImpl interface {
+
+	// SomeActivity1 does some activity thing.
 	SomeActivity1(context.Context) error
 
+	// SomeActivity2 does some activity thing.
 	SomeActivity2(context.Context, *SomeActivity2Request) error
 
+	// SomeActivity3 does some activity thing.
 	SomeActivity3(context.Context, *SomeActivity3Request) (*SomeActivity3Response, error)
 }
 
@@ -797,6 +837,7 @@ func RegisterSomeActivity1(r worker.ActivityRegistry, impl func(context.Context)
 	r.RegisterActivityWithOptions(impl, activity.RegisterOptions{Name: SomeActivity1Name})
 }
 
+// SomeActivity1 does some activity thing.
 func SomeActivity1(ctx workflow.Context, opts *workflow.ActivityOptions) SomeActivity1Future {
 	if opts == nil {
 		ctxOpts := workflow.GetActivityOptions(ctx)
@@ -806,6 +847,7 @@ func SomeActivity1(ctx workflow.Context, opts *workflow.ActivityOptions) SomeAct
 	return SomeActivity1Future{workflow.ExecuteActivity(ctx, SomeActivity1Name)}
 }
 
+// SomeActivity1 does some activity thing.
 func SomeActivity1Local(ctx workflow.Context, opts *workflow.LocalActivityOptions, fn func(context.Context) error) SomeActivity1Future {
 	if opts == nil {
 		ctxOpts := workflow.GetLocalActivityOptions(ctx)
@@ -837,6 +879,7 @@ func RegisterSomeActivity2(r worker.ActivityRegistry, impl func(context.Context,
 	r.RegisterActivityWithOptions(impl, activity.RegisterOptions{Name: SomeActivity2Name})
 }
 
+// SomeActivity2 does some activity thing.
 func SomeActivity2(ctx workflow.Context, opts *workflow.ActivityOptions, req *SomeActivity2Request) SomeActivity2Future {
 	if opts == nil {
 		ctxOpts := workflow.GetActivityOptions(ctx)
@@ -849,6 +892,7 @@ func SomeActivity2(ctx workflow.Context, opts *workflow.ActivityOptions, req *So
 	return SomeActivity2Future{workflow.ExecuteActivity(ctx, SomeActivity2Name, req)}
 }
 
+// SomeActivity2 does some activity thing.
 func SomeActivity2Local(ctx workflow.Context, opts *workflow.LocalActivityOptions, fn func(context.Context, *SomeActivity2Request) error, req *SomeActivity2Request) SomeActivity2Future {
 	if opts == nil {
 		ctxOpts := workflow.GetLocalActivityOptions(ctx)
@@ -883,6 +927,7 @@ func RegisterSomeActivity3(r worker.ActivityRegistry, impl func(context.Context,
 	r.RegisterActivityWithOptions(impl, activity.RegisterOptions{Name: SomeActivity3Name})
 }
 
+// SomeActivity3 does some activity thing.
 func SomeActivity3(ctx workflow.Context, opts *workflow.ActivityOptions, req *SomeActivity3Request) SomeActivity3Future {
 	if opts == nil {
 		ctxOpts := workflow.GetActivityOptions(ctx)
@@ -895,6 +940,7 @@ func SomeActivity3(ctx workflow.Context, opts *workflow.ActivityOptions, req *So
 	return SomeActivity3Future{workflow.ExecuteActivity(ctx, SomeActivity3Name, req)}
 }
 
+// SomeActivity3 does some activity thing.
 func SomeActivity3Local(ctx workflow.Context, opts *workflow.LocalActivityOptions, fn func(context.Context, *SomeActivity3Request) (*SomeActivity3Response, error), req *SomeActivity3Request) SomeActivity3Future {
 	if opts == nil {
 		ctxOpts := workflow.GetLocalActivityOptions(ctx)
