@@ -31,7 +31,7 @@ type Client interface {
 
 	Serialize(ctx context.Context, workflowID, runID string) (*SerializeResponse, error)
 
-	// Errors are silently logged
+	// Errors fail the workflow by default
 	Update(ctx context.Context, workflowID, runID string, req *UpdateRequest) error
 
 	Exec(ctx context.Context, workflowID, runID string, req *ExecRequest) (*ExecResponse, error)
@@ -153,7 +153,7 @@ type SqliteRun interface {
 
 	Serialize(ctx context.Context) (*SerializeResponse, error)
 
-	// Errors are silently logged
+	// Errors fail the workflow by default
 	Update(ctx context.Context, req *UpdateRequest) error
 
 	Exec(ctx context.Context, req *ExecRequest) (*ExecResponse, error)
@@ -234,7 +234,7 @@ func RegisterSqlite(r worker.WorkflowRegistry, newImpl func(workflow.Context, *S
 	r.RegisterWorkflowWithOptions(BuildSqlite(newImpl), workflow.RegisterOptions{Name: SqliteName})
 }
 
-// Errors are silently logged
+// Errors fail the workflow by default
 type Update struct{ Channel workflow.ReceiveChannel }
 
 // Receive blocks until signal is received.
@@ -354,7 +354,7 @@ func (r SqliteChildRun) Select(sel workflow.Selector, fn func(SqliteChildRun)) w
 	})
 }
 
-// Errors are silently logged
+// Errors fail the workflow by default
 func (r SqliteChildRun) Update(ctx workflow.Context, req *UpdateRequest) workflow.Future {
 	return r.Future.SignalChildWorkflow(ctx, UpdateName, req)
 }
@@ -373,7 +373,7 @@ func (r SqliteChildRun) Exec(ctx workflow.Context, req *ExecRequest) (ExecRespon
 	return resp, nil
 }
 
-// Errors are silently logged
+// Errors fail the workflow by default
 func UpdateExternal(ctx workflow.Context, workflowID, runID string, req *UpdateRequest) workflow.Future {
 	return workflow.SignalExternalWorkflow(ctx, workflowID, runID, UpdateName, req)
 }

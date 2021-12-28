@@ -2,19 +2,53 @@ package temporalsqlite
 
 import (
 	"fmt"
+	"strings"
 
 	"crawshaw.io/sqlite"
 	"github.com/cretz/temporal-sdk-go-advanced/temporalsqlite/sqlitepb"
+	"go.temporal.io/sdk/log"
 )
 
-type db struct {
-	conn              *sqlite.Conn
-	prevSer           *sqlite.Serialized
-	stmtFirstMutateOp sqlite.OpType
+var DefaultNonDeterministicFuncs = map[string]bool{
+	"current_date":      true,
+	"current_time":      true,
+	"current_timestamp": true,
+	"random":            true,
+	"random_blob":       true,
+	// TODO(cretz): For datetime('now') and the like, we could replace the
+	// function with our own impl that forwarded to strftime _after_ confirming
+	// that "now" isn't used.
 }
 
-func openDB(prevSerialized []byte) (*db, error) {
+var allowedReadOnlyActions = map[sqlite.OpType]bool{
+	sqlite.SQLITE_READ:     true,
+	sqlite.SQLITE_FUNCTION: true,
+	sqlite.SQLITE_SELECT:   true,
+}
+
+type db struct {
+	dbOptions
+	conn                          *sqlite.Conn
+	prevSer                       *sqlite.Serialized
+	stmtFirstMutateOp             sqlite.OpType
+	stmtFirstNonDeterministicFunc string
+}
+
+type dbOptions struct {
+	log                   log.Logger
+	logQueries            bool
+	logActions            bool
+	prevSerialized        []byte
+	nonDeterministicFuncs map[string]bool
+}
+
+func openDB(opts dbOptions) (*db, error) {
+	if opts.log == nil {
+		return nil, fmt.Errorf("missing log")
+	}
+
 	// TODO(cretz): sqlite3_config(SQLITE_CONFIG_SINGLETHREAD)?
+	// TODO(cretz): Replace/disable non-deterministic functions
 	conn, err := sqlite.OpenConn(":memory:", 0)
 	if err != nil {
 		return nil, err
@@ -26,24 +60,36 @@ func openDB(prevSerialized []byte) (*db, error) {
 		}
 	}()
 
-	db := &db{conn: conn}
+	db := &db{dbOptions: opts, conn: conn}
 
 	// If there is a previously serialized DB, use it, making sure to copy over to
 	// sqlite so it can resize as necessary
-	if len(prevSerialized) > 0 {
+	if len(opts.prevSerialized) > 0 {
 		// We must store this on the DB since we need a reference to it while we're
 		// using the DB
-		db.prevSer = sqlite.NewSerialized("", prevSerialized, true)
+		db.prevSer = sqlite.NewSerialized("", opts.prevSerialized, true)
 		err = db.conn.Deserialize(db.prevSer, sqlite.SQLITE_DESERIALIZE_FREEONCLOSE|sqlite.SQLITE_DESERIALIZE_RESIZEABLE)
 		if err != nil {
 			return nil, fmt.Errorf("unable to deserialize DB: %w", err)
 		}
+		opts.prevSerialized = nil
 	}
 
 	// Set the authorize func
 	db.conn.SetAuthorizer(sqlite.AuthorizeFunc(func(info sqlite.ActionInfo) sqlite.AuthResult {
-		if db.stmtFirstMutateOp == 0 && info.Action != sqlite.SQLITE_READ && info.Action != sqlite.SQLITE_SELECT {
+		if db.logActions {
+			db.log.Debug("Query action", "action", info)
+		}
+
+		// Check if action is not read-only
+		if db.stmtFirstMutateOp == 0 && !allowedReadOnlyActions[info.Action] {
 			db.stmtFirstMutateOp = info.Action
+		}
+		updateNonDet := info.Action == sqlite.SQLITE_FUNCTION &&
+			db.stmtFirstNonDeterministicFunc == "" &&
+			db.nonDeterministicFuncs[strings.ToLower(info.Function)]
+		if updateNonDet {
+			db.stmtFirstNonDeterministicFunc = info.Function
 		}
 		return 0
 	}))
@@ -60,44 +106,105 @@ func (d *db) close() {
 	d.prevSer = nil
 }
 
-func (d *db) exec(
+func (d *db) execAll(req *sqlitepb.StmtRequest, readOnly bool, includeResult bool) *sqlitepb.StmtResponse {
+	res := &sqlitepb.StmtResponse{}
+	for _, s := range req.Stmts {
+		res.Results = append(res.Results, d.exec(s, readOnly, includeResult))
+		if res.Results[len(res.Results)-1].Error == nil {
+			break
+		}
+	}
+	return res
+}
+
+func (d *db) exec(s *sqlitepb.Stmt, readOnly bool, includeResult bool) (res *sqlitepb.StmtResult) {
+	res = &sqlitepb.StmtResult{}
+	if s == nil || s.Sql == "" {
+		res.Error = &sqlitepb.StmtResult_Error{Message: "missing sql"}
+		return
+	} else if s.MultiQuery && (len(s.IndexedParams) != 0 || len(s.NamedParams) != 0) {
+		res.Error = &sqlitepb.StmtResult_Error{Message: "multi-query cannot have params"}
+		return
+	}
+
+	// We have to loop in case it's a multi-query
+	sql := strings.TrimSpace(s.Sql)
+	for sql != "" {
+		if d.logQueries {
+			d.log.Debug("Exec SQL", "sql", sql, "readOnly", readOnly, "includeResult", includeResult)
+		}
+		var ok *sqlitepb.StmtResult_Success
+		ok, sql, res.Error = d.execSingle(s, sql, readOnly, includeResult)
+		if res.Error != nil {
+			d.log.Warn("Exec failed", "error", res.Error)
+			break
+		}
+		if d.logQueries {
+			d.log.Debug("Exec succeeded", "rowCount", len(ok.Rows))
+		}
+		res.Successes = append(res.Successes, ok)
+	}
+	return
+}
+
+func (d *db) execSingle(
 	s *sqlitepb.Stmt,
+	sql string,
 	readOnly bool,
 	includeResult bool,
-) (stmtRes *sqlitepb.StmtResult, stmtErr *sqlitepb.StmtError) {
-	if s == nil || s.Sql == "" {
-		return nil, stmtErrorf("missing sql")
-	}
-	// Reset the mutate op so it can be fetched during prepare
+) (ok *sqlitepb.StmtResult_Success, remainingSQL string, resErr *sqlitepb.StmtResult_Error) {
+	// Reset values so they can be fetched during prepare
 	d.stmtFirstMutateOp = 0
+	d.stmtFirstNonDeterministicFunc = ""
 
 	// Prepare statement
-	stmt, _, err := d.conn.PrepareTransient(s.Sql)
+	stmt, trailingBytes, err := d.conn.PrepareTransient(sql)
 	if err != nil {
-		return nil, convertStmtError(err)
+		return nil, "", convertStmtError(err)
 	}
 	defer func() {
 		err := stmt.Finalize()
-		if err != nil && stmtErr == nil {
-			stmtErr = convertStmtError(err)
+		if err != nil && resErr == nil {
+			resErr = convertStmtError(err)
 		}
 	}()
 
 	// Check read only
+	// TODO(cretz): Could just expose https://www.sqlite.org/c3ref/stmt_readonly.html
 	if readOnly && d.stmtFirstMutateOp > 0 {
-		return nil, stmtErrorf("statement expected to be read only but got action %v", d.stmtFirstMutateOp)
+		return nil, "", &sqlitepb.StmtResult_Error{
+			Message: fmt.Sprintf("statement expected to be read only but got action %v", d.stmtFirstMutateOp),
+		}
 	}
 
-	// Bind parameters
+	// Check non-deterministic function
+	if d.stmtFirstNonDeterministicFunc != "" {
+		return nil, "", &sqlitepb.StmtResult_Error{
+			Message: fmt.Sprintf("statement called non-deterministic function %v", d.stmtFirstNonDeterministicFunc),
+		}
+	}
+
+	// Check trailing bytes
+	if trailingBytes > 0 {
+		if !s.MultiQuery {
+			return nil, "", &sqlitepb.StmtResult_Error{
+				Message: "expected single statement since multi-query not set, but got multiple",
+			}
+		}
+		remainingSQL = strings.TrimSpace(sql[len(sql)-trailingBytes:])
+	}
+
+	// Bind params
 	if err := bindParams(stmt, s); err != nil {
-		return nil, err
+		return nil, "", convertStmtError(err)
 	}
 
 	// Prepare result
+	ok = &sqlitepb.StmtResult_Success{}
 	if includeResult {
-		stmtRes = &sqlitepb.StmtResult{Columns: make([]*sqlitepb.StmtResult_Column, stmt.ColumnCount())}
-		for i := range stmtRes.Columns {
-			stmtRes.Columns[i] = &sqlitepb.StmtResult_Column{Name: stmt.ColumnName(i)}
+		ok.Columns = make([]*sqlitepb.StmtResult_Column, stmt.ColumnCount())
+		for i := range ok.Columns {
+			ok.Columns[i] = &sqlitepb.StmtResult_Column{Name: stmt.ColumnName(i)}
 		}
 	}
 
@@ -105,17 +212,17 @@ func (d *db) exec(
 	for {
 		hasRow, err := stmt.Step()
 		if err != nil {
-			return nil, convertStmtError(err)
+			return nil, "", convertStmtError(err)
 		} else if !hasRow {
-			return stmtRes, nil
+			return
 		}
 		// Only populate results if wanted
-		if stmtRes != nil {
-			row, err := stmtRow(stmt, stmtRes.Columns)
+		if includeResult {
+			row, err := stmtRow(stmt, ok.Columns)
 			if err != nil {
-				return nil, err
+				return nil, "", convertStmtError(err)
 			}
-			stmtRes.Rows = append(stmtRes.Rows, row)
+			ok.Rows = append(ok.Rows, row)
 		}
 	}
 }
@@ -137,18 +244,14 @@ func (d *db) serialize() ([]byte, error) {
 	return res, nil
 }
 
-func convertStmtError(err error) *sqlitepb.StmtError {
-	return &sqlitepb.StmtError{Code: int64(sqlite.ErrCode(err)), Message: err.Error()}
+func convertStmtError(err error) *sqlitepb.StmtResult_Error {
+	return &sqlitepb.StmtResult_Error{Code: int64(sqlite.ErrCode(err)), Message: err.Error()}
 }
 
-func stmtErrorf(f string, v ...interface{}) *sqlitepb.StmtError {
-	return &sqlitepb.StmtError{Message: fmt.Sprintf(f, v...)}
-}
-
-func bindParams(stmt *sqlite.Stmt, s *sqlitepb.Stmt) *sqlitepb.StmtError {
+func bindParams(stmt *sqlite.Stmt, s *sqlitepb.Stmt) error {
 	for k, v := range s.IndexedParams {
 		k := int(k)
-		switch v := v.Kind.(type) {
+		switch v := v.Value.(type) {
 		case nil:
 		case *sqlitepb.Value_NullValue:
 			stmt.BindNull(k)
@@ -161,11 +264,11 @@ func bindParams(stmt *sqlite.Stmt, s *sqlitepb.Stmt) *sqlitepb.StmtError {
 		case *sqlitepb.Value_BytesValue:
 			stmt.BindBytes(k, v.BytesValue)
 		default:
-			return stmtErrorf("unrecognized param type %T", v)
+			return fmt.Errorf("unrecognized param type %T", v)
 		}
 	}
 	for k, v := range s.NamedParams {
-		switch v := v.Kind.(type) {
+		switch v := v.Value.(type) {
 		case nil:
 		case *sqlitepb.Value_NullValue:
 			stmt.SetNull(k)
@@ -178,30 +281,30 @@ func bindParams(stmt *sqlite.Stmt, s *sqlitepb.Stmt) *sqlitepb.StmtError {
 		case *sqlitepb.Value_BytesValue:
 			stmt.SetBytes(k, v.BytesValue)
 		default:
-			return stmtErrorf("unrecognized param type %T", v)
+			return fmt.Errorf("unrecognized param type %T", v)
 		}
 	}
 	return nil
 }
 
-func stmtRow(stmt *sqlite.Stmt, cols []*sqlitepb.StmtResult_Column) (*sqlitepb.StmtResult_Row, *sqlitepb.StmtError) {
+func stmtRow(stmt *sqlite.Stmt, cols []*sqlitepb.StmtResult_Column) (*sqlitepb.StmtResult_Row, error) {
 	row := &sqlitepb.StmtResult_Row{Values: make([]*sqlitepb.Value, len(cols))}
 	for i := range row.Values {
 		switch t := stmt.ColumnType(i); t {
 		case sqlite.SQLITE_NULL:
-			row.Values[i] = &sqlitepb.Value{Kind: &sqlitepb.Value_NullValue{NullValue: true}}
+			row.Values[i] = &sqlitepb.Value{Value: &sqlitepb.Value_NullValue{NullValue: true}}
 		case sqlite.SQLITE_INTEGER:
-			row.Values[i] = &sqlitepb.Value{Kind: &sqlitepb.Value_IntValue{IntValue: stmt.ColumnInt64(i)}}
+			row.Values[i] = &sqlitepb.Value{Value: &sqlitepb.Value_IntValue{IntValue: stmt.ColumnInt64(i)}}
 		case sqlite.SQLITE_FLOAT:
-			row.Values[i] = &sqlitepb.Value{Kind: &sqlitepb.Value_FloatValue{FloatValue: stmt.ColumnFloat(i)}}
+			row.Values[i] = &sqlitepb.Value{Value: &sqlitepb.Value_FloatValue{FloatValue: stmt.ColumnFloat(i)}}
 		case sqlite.SQLITE_TEXT:
-			row.Values[i] = &sqlitepb.Value{Kind: &sqlitepb.Value_StringValue{StringValue: stmt.ColumnText(i)}}
+			row.Values[i] = &sqlitepb.Value{Value: &sqlitepb.Value_StringValue{StringValue: stmt.ColumnText(i)}}
 		case sqlite.SQLITE_BLOB:
 			b := make([]byte, stmt.ColumnLen(i))
 			stmt.ColumnBytes(i, b)
-			row.Values[i] = &sqlitepb.Value{Kind: &sqlitepb.Value_BytesValue{BytesValue: b}}
+			row.Values[i] = &sqlitepb.Value{Value: &sqlitepb.Value_BytesValue{BytesValue: b}}
 		default:
-			return nil, stmtErrorf("unrecognized column type %v", t)
+			return nil, fmt.Errorf("unrecognized column type %v", t)
 		}
 	}
 	return row, nil
