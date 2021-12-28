@@ -5,6 +5,8 @@ go 1.17
 require (
 	crawshaw.io/sqlite v0.0.0-00010101000000-000000000000
 	github.com/cretz/temporal-sdk-go-advanced/temporalproto v0.0.0-00010101000000-000000000000
+	github.com/cretz/temporal-sdk-go-advanced/temporalutil v0.0.0-00010101000000-000000000000
+	github.com/google/uuid v1.3.0
 	github.com/pierrec/lz4/v4 v4.1.12
 	go.temporal.io/sdk v1.12.0
 	google.golang.org/protobuf v1.27.1
@@ -18,7 +20,6 @@ require (
 	github.com/gogo/status v1.1.0 // indirect
 	github.com/golang/mock v1.6.0 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
-	github.com/google/uuid v1.3.0 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0 // indirect
 	github.com/pborman/uuid v1.2.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
@@ -40,4 +41,5 @@ replace (
 	// For serialize, at least until https://github.com/crawshaw/sqlite/pull/132 accepted
 	crawshaw.io/sqlite => github.com/cretz/crawshaw-sqlite v0.3.3-0.20211227191323-903935e86940
 	github.com/cretz/temporal-sdk-go-advanced/temporalproto => ../temporalproto
+	github.com/cretz/temporal-sdk-go-advanced/temporalutil => ../temporalutil
 )

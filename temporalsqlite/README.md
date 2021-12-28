@@ -6,3 +6,9 @@ Regen protos:
     go install ../temporalproto/cmd/protoc-gen-go_temporal
 
     protoc --go_out=paths=source_relative:. --go_temporal_out=paths=source_relative:. -I . -I ../temporalproto ./sqlitepb/sqlite.proto
+
+Run tests:
+
+    cd test
+
+    go test -ldflags "-extldflags=-Wl,--allow-multiple-definition" .

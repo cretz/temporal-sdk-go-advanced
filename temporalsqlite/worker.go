@@ -97,7 +97,7 @@ func (s *sqliteImpl) Query(req *sqlitepb.QueryRequest) (*sqlitepb.QueryResponse,
 	// Does not increment statement count of course since queries do not have any
 	// side effects
 	s.log.Debug("Query requested", "sql", req.Stmt.GetSql())
-	res, err := s.db.exec(req.Stmt, false, true)
+	res, err := s.db.exec(req.Stmt, true, true)
 	var resp sqlitepb.QueryResponse
 	if err != nil {
 		s.log.Warn("Query failed", "error", err)

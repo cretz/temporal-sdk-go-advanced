@@ -15,6 +15,7 @@ type db struct {
 
 func openDB(prevSerialized []byte) (*db, error) {
 	// TODO(cretz): sqlite3_config(SQLITE_CONFIG_SINGLETHREAD)?
+	// TODO(cretz): Replace/disable non-deterministic functions
 	conn, err := sqlite.OpenConn(":memory:", 0)
 	if err != nil {
 		return nil, err

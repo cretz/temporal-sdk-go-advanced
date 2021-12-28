@@ -412,3 +412,4 @@ func (SomeCallResponseExternal) Select(sel workflow.Selector, fn func(*SomeCallR
 * More workflow and activity options
 * Option to set the generated code prefix
 * Code cleanup to support more reuse (lots of copy/pasted strings everywhere)
+* Generate code to help testing too
