@@ -7,13 +7,16 @@ require (
 	github.com/cretz/temporal-sdk-go-advanced/temporalproto v0.0.0-00010101000000-000000000000
 	github.com/cretz/temporal-sdk-go-advanced/temporalutil v0.0.0-00010101000000-000000000000
 	github.com/google/uuid v1.3.0
+	github.com/olekukonko/tablewriter v0.0.5
 	github.com/pierrec/lz4/v4 v4.1.12
+	github.com/urfave/cli/v2 v2.3.0
 	go.temporal.io/api v1.5.0
 	go.temporal.io/sdk v1.12.0
 	google.golang.org/protobuf v1.27.1
 )
 
 require (
+	github.com/cpuguy83/go-md2man/v2 v2.0.0-20190314233015-f79a8a8ca69d // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/facebookgo/clock v0.0.0-20150410010913-600d898af40a // indirect
 	github.com/gogo/googleapis v1.4.1 // indirect
@@ -22,9 +25,12 @@ require (
 	github.com/golang/mock v1.6.0 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0 // indirect
+	github.com/mattn/go-runewidth v0.0.9 // indirect
 	github.com/pborman/uuid v1.2.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/robfig/cron v1.2.0 // indirect
+	github.com/russross/blackfriday/v2 v2.0.1 // indirect
+	github.com/shurcooL/sanitized_anchor_name v1.0.0 // indirect
 	github.com/stretchr/objx v0.3.0 // indirect
 	github.com/stretchr/testify v1.7.0 // indirect
 	go.uber.org/atomic v1.9.0 // indirect

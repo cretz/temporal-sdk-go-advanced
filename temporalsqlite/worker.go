@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"runtime"
 	"time"
 
 	"crawshaw.io/sqlite"
@@ -96,7 +97,10 @@ func (s *sqliteImpl) Run(ctx workflow.Context) error {
 	if err != nil {
 		return err
 	}
-	defer s.db.close()
+	// We set the DB to close on GC collection, not on completion of this
+	// function. If we close the DB on function completion, then queries cannot
+	// run after workflow complete.
+	runtime.SetFinalizer(s.db, func(d *db) { d.close() })
 	if s.InitializeSqlite != nil {
 		if err := s.InitializeSqlite(s.db.conn); err != nil {
 			return err

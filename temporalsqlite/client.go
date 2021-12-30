@@ -18,6 +18,7 @@ type ConnectDBOptions struct {
 	Sqlite        *sqlitepb.SqliteOptions
 }
 
+// TODO(cretz): Document default ID reuse policy
 func ConnectDB(ctx context.Context, c client.Client, opts ConnectDBOptions) (*Client, error) {
 	// Require the workflow ID
 	if opts.StartWorkflow.ID == "" {

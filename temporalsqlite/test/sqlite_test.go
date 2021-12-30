@@ -8,7 +8,7 @@ import (
 
 	"crawshaw.io/sqlite"
 	"crawshaw.io/sqlite/sqlitex"
-	"github.com/DataDog/temporalite/temporaltest"
+	"github.com/DataDog/temporalite"
 	"github.com/cretz/temporal-sdk-go-advanced/temporalsqlite"
 	"github.com/cretz/temporal-sdk-go-advanced/temporalsqlite/sqlitepb"
 	"github.com/google/uuid"
@@ -16,7 +16,11 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
+	"go.temporal.io/server/common/log"
 )
+
+const showServerLogs = false
+const showQueries = false
 
 func (s *Suite) TestSimpleQueries() {
 	db := s.connectDB()
@@ -156,35 +160,44 @@ func (s *Suite) TestContinueAsNew() {
 	// Get run
 	run1, err := db.GetRun(s.ctx)
 	s.NoError(err)
+	origRunID := run1.RunID()
 
-	// Create a table and do 15 updates
+	// Create a table and do 9 updates
+	// TODO(cretz): There is currently a bug where, every so often, when you send
+	// _over_ the amount of signals, it takes 10 seconds to continue from where it
+	// left off. In talks with server team about this.
 	s.NoError(db.UpdateSimple(s.ctx, "CREATE TABLE mytable1 (v1 PRIMARY KEY, v2, v3)"))
-	for i := 0; i < 15; i++ {
-		s.NoError(db.UpdateSimple(s.ctx, fmt.Sprintf("INSERT INTO mytable1 VALUES ('foo%v', 'bar%v', 'baz%v'); ", i, i, i)))
+	for i := 0; i < 9; i++ {
+		s.NoError(db.UpdateSimple(s.ctx, fmt.Sprintf("INSERT INTO mytable1 VALUES ('foo%v', 'bar%v', 'baz%v')", i, i, i)))
 	}
 
 	// Wait until a new run occurs
 	s.Eventually(func() bool {
 		run2, err := db.GetRun(s.ctx)
 		s.NoError(err)
-		return run1.RunID() != run2.RunID()
-	}, 5*time.Second, 100*time.Millisecond)
+		return origRunID != run2.RunID()
+	}, 10*time.Second, 100*time.Millisecond)
 
 	// Now issue another insert and select from before and after
-	// db.ExecMulti(s.ctx,
-	// 	"INSERT INTO mytable1 VALUES ('new1', 'new2', 'new3');"+
-	// 		"SELECT * FROM mytable1")
-
-	panic("TODO")
+	res, err := db.ExecMulti(s.ctx,
+		"INSERT INTO mytable1 VALUES ('new1', 'new2', 'new3');"+
+			"SELECT * FROM mytable1 WHERE v1 = 'foo8';"+
+			"SELECT * FROM mytable1 WHERE v1 = 'new1';")
+	s.NoError(err)
+	s.Len(res, 3)
+	s.Equal([][]interface{}{{"foo8", "bar8", "baz8"}}, res[1].Rows)
+	s.Equal([][]interface{}{{"new1", "new2", "new3"}}, res[2].Rows)
 }
 
 type Suite struct {
 	suite.Suite
 	*require.Assertions
 	taskQueue string
-	server    *temporaltest.TestServer
-	ctx       context.Context
-	cancel    context.CancelFunc
+	// server    *temporaltest.TestServer
+	server *temporalite.Server
+	client client.Client
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 func TestSuite(t *testing.T) { suite.Run(t, new(Suite)) }
@@ -194,14 +207,33 @@ func (s *Suite) SetupSuite() {
 
 	// Start server and register worker
 	s.taskQueue = "sqlite-test-" + uuid.NewString()
-	s.server = temporaltest.NewServer(temporaltest.WithT(s.T()))
-	s.server.Worker(s.taskQueue, func(r worker.Registry) {
-		temporalsqlite.RegisterSqliteWorker(r, temporalsqlite.SqliteWorkerOptions{LogQueries: true})
+	namespace := "test-ns-" + uuid.NewString()
+	opts := []temporalite.ServerOption{
+		temporalite.WithNamespaces(namespace),
+		temporalite.WithPersistenceDisabled(),
+		temporalite.WithDynamicPorts(),
+	}
+	if !showServerLogs {
+		opts = append(opts, temporalite.WithLogger(log.NewNoopLogger()))
+	}
+	var err error
+	s.server, err = temporalite.NewServer(opts...)
+	s.NoError(err)
+	s.NoError(s.server.Start())
+	s.T().Cleanup(s.server.Stop)
+	s.client, err = s.server.NewClient(context.Background(), namespace)
+	s.NoError(err)
+	s.T().Cleanup(s.client.Close)
+	wrk := worker.New(s.client, s.taskQueue, worker.Options{
+		WorkflowPanicPolicy: worker.FailWorkflow,
 	})
+	temporalsqlite.RegisterSqliteWorker(wrk, temporalsqlite.SqliteWorkerOptions{LogQueries: showQueries})
+	s.NoError(wrk.Start())
+	s.T().Cleanup(wrk.Stop)
 }
 
 func (s *Suite) SetupTest() {
-	s.ctx, s.cancel = context.WithTimeout(context.Background(), 10*time.Second)
+	s.ctx, s.cancel = context.WithTimeout(context.Background(), 20*time.Second)
 }
 
 func (s *Suite) TearDownTest() {
@@ -221,7 +253,7 @@ func (s *Suite) connectDBWithOptions(opts temporalsqlite.ConnectDBOptions) *temp
 	if opts.StartWorkflow.TaskQueue == "" {
 		opts.StartWorkflow.TaskQueue = s.taskQueue
 	}
-	client, err := temporalsqlite.ConnectDB(context.Background(), s.server.Client(), opts)
+	client, err := temporalsqlite.ConnectDB(s.ctx, s.client, opts)
 	s.NoError(err)
 	s.T().Cleanup(client.Close)
 	return client
