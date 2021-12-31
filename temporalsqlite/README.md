@@ -102,7 +102,7 @@ must do the same thing and produce the same result within the context of the ent
 
 To reduce non-determinism, this implementation disables use of `current_date()`, `random()`, and other
 non-deterministic functions. However, it does not restrict all functions considered non-deterministic by SQLite such as
-`last_insert_rowid()` since that is deterministic by Temporal standard.
+`last_insert_rowid()` since that is deterministic by Temporal standards.
 
 The SQLite date/time functions like `datetime()` are only non-deterministic for some arguments (namely `'now'`). Since
 this cannot be prevented via simple function definition without removing the entire date/time functionality, the current
@@ -123,23 +123,20 @@ history too. Therefore items like entire SQL responses to executions are stored 
 recommended for large requests/responses.
 
 As mentioned in the "Serialization" section, this project serializes the entire database as an LZ4-compressed blob for
-continue-as-new. Since that means it is used as the workflow parameter and since the serialized state is used as a
-parameter for the workflow, it is also stored in history. In practice this means that while dozens of inserts may only
-result in a 2K blob, many hundreds/thousands can easily exceed 20K or more. This project is not recommended for large
-databases.
+continue-as-new. Since the serialized state is used as a parameter for the workflow, it is also stored in history. In
+practice this means that while dozens of inserts may only result in a 2K blob, many hundreds/thousands can easily exceed
+20K or more. This project is not recommended for large databases.
 
 ## Building
 
-This project may be used as a library or a CLI. To build the CLI, with the latest `Go` on the `PATH`, from this
+This project may be used as a library or a CLI. To build the CLI, with the latest `go` on the `PATH`, from this
 directory run:
 
     go build ./cmd/temporalsqlite
 
-Here is the usage defa
-
 ## Usage and CLI Walkthrough
 
-Commands here use the build `temporalsqlite` CLI binary, but that can be replaced with `go run ./cmd/temporalsqlite` to
+Commands here use the built `temporalsqlite` CLI binary, but that can be replaced with `go run ./cmd/temporalsqlite` to
 skip the build step. Here is output of `--help`:
 
 ```
