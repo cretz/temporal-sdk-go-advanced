@@ -351,7 +351,7 @@ func SomeSignalExternal(ctx workflow.Context, workflowID, runID string, req *Som
 
 ### Calls
 
-Queries are `rpc` calls with the `temporal.sdk.query` options. For example:
+Calls are `rpc` calls with the `temporal.sdk.call` options. For example:
 
 ```proto
   rpc SomeCall(SomeCallRequest) returns (SomeCallResponse) {

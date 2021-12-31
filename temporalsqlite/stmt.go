@@ -8,29 +8,37 @@ import (
 	"github.com/cretz/temporal-sdk-go-advanced/temporalsqlite/sqlitepb"
 )
 
+// Stmt represents a statement used by clients.
 type Stmt struct {
 	Query string
+
 	// Param indexes start at 1. Values can be null, bool, integer, float, string,
 	// byte slice, or pointer to any of those.
 	IndexedParams map[int]interface{}
 	NamedParams   map[string]interface{}
 
-	// Cannot have any params if this is true
+	// If true, Query can contain multiple semicolon-delimited queries. The
+	// statement cannot have any parameters set if this value true. If false,
+	// Query can only contain a single query.
 	Multi bool
 }
 
-func NewSingleStmt(query string, args ...interface{}) *Stmt {
-	s := &Stmt{Query: query, IndexedParams: make(map[int]interface{}, len(args))}
-	for i, v := range args {
+// NewSingleStmt creates a new single-query statement with the given indexed
+// params.
+func NewSingleStmt(query string, params ...interface{}) *Stmt {
+	s := &Stmt{Query: query, IndexedParams: make(map[int]interface{}, len(params))}
+	for i, v := range params {
 		s.IndexedParams[i+1] = v
 	}
 	return s
 }
 
+// NewMultiStmt creates a new multi-query statement.
 func NewMultiStmt(query string) *Stmt {
 	return &Stmt{Query: query, Multi: true}
 }
 
+// ToProto converts this statement to its protobuf equivalent.
 func (s *Stmt) ToProto() (*sqlitepb.Stmt, error) {
 	stmt := &sqlitepb.Stmt{
 		Sql:           s.Query,
@@ -55,6 +63,7 @@ func (s *Stmt) ToProto() (*sqlitepb.Stmt, error) {
 	return stmt, nil
 }
 
+// StmtsToProto converts these statements to a protobuf request.
 func StmtsToProto(stmts []*Stmt) (*sqlitepb.StmtRequest, error) {
 	if len(stmts) == 0 {
 		return nil, fmt.Errorf("no statements")
@@ -69,22 +78,33 @@ func StmtsToProto(stmts []*Stmt) (*sqlitepb.StmtRequest, error) {
 	return req, nil
 }
 
+// StmtResult represents a result of a client statement.
 type StmtResult struct {
+	// All successes that occurred. This will only contain the successes up until
+	// the first error. This only has multiple values if Stmt.Multi was true.
 	Successes []*StmtResultSuccess
-	Error     *StmtResultError
+
+	// The first error encountered (and last error since an error stops
+	// execution).
+	Error *StmtResultError
 }
 
+// StmtResultSuccess represents a single query success (of which a statement
+// can have multiple).
 type StmtResultSuccess struct {
+	// Column names for the query result.
 	ColumnNames []string
-	// Values are null, int64, float64, string, or bytes
+	// Values can be nil, int64, float64, string, or bytes.
 	Rows [][]interface{}
 }
 
+// StmtResultError represents an error from a statement.
 type StmtResultError struct {
 	Code    int
 	Message string
 }
 
+// Error implements error.Error.
 func (s *StmtResultError) Error() string {
 	if s.Code == 0 {
 		return s.Message
@@ -92,6 +112,7 @@ func (s *StmtResultError) Error() string {
 	return fmt.Sprintf("%v (code %v)", s.Message, s.Code)
 }
 
+// FromProto converts the given protobuf result to this value.
 func (s *StmtResult) FromProto(res *sqlitepb.StmtResult) {
 	s.Successes = make([]*StmtResultSuccess, len(res.Successes))
 	for i, pbSucc := range res.Successes {
@@ -114,6 +135,8 @@ func (s *StmtResult) FromProto(res *sqlitepb.StmtResult) {
 	}
 }
 
+// StmtResultsFromProto converts the given protobuf response to statement
+// results.
 func StmtResultsFromProto(res *sqlitepb.StmtResponse) []*StmtResult {
 	results := make([]*StmtResult, len(res.Results))
 	for i, result := range res.Results {
@@ -123,6 +146,9 @@ func StmtResultsFromProto(res *sqlitepb.StmtResponse) []*StmtResult {
 	return results
 }
 
+// ToProtoValue converts a single Go value to a protobuf value. The value must
+// be nil, bool, integer, float, string, byte slice, or a pointer to any of
+// those.
 func ToProtoValue(v interface{}) (*sqlitepb.Value, error) {
 	return toProtoValue(reflect.ValueOf(v))
 }
@@ -161,6 +187,8 @@ func toProtoValue(v reflect.Value) (*sqlitepb.Value, error) {
 	}
 }
 
+// FromProtoValue converts the given protobuf value to a Go value. This will
+// return nil, int64, float64, string, or bytes.
 func FromProtoValue(v *sqlitepb.Value) interface{} {
 	switch v := v.Value.(type) {
 	case nil, *sqlitepb.Value_NullValue:

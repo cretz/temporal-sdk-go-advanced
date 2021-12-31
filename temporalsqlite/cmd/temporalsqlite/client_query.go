@@ -23,7 +23,7 @@ type queryConfig struct {
 func (q *queryConfig) flags() []cli.Flag {
 	return append(q.clientConfig.flags(),
 		&cli.StringSliceFlag{
-			Name:        "params",
+			Name:        "param",
 			Usage:       "Parameters in the form of <index|name>=<type>(<value>) (or just =null, indices start at 1)",
 			Destination: &q.params,
 		},

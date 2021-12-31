@@ -16,30 +16,39 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
+// DefaultRequestsUntilContinueAsNew is the default for
+// SqliteWorkerOptions.DefaultRequestsUntilContinueAsNew.
 const DefaultRequestsUntilContinueAsNew = 5000
 
+// SqliteWorkerOptions are options for RegisterSqliteWorker. All values are
+// optional.
 type SqliteWorkerOptions struct {
+	// Compression options for serialization.
 	CompressionOptions []lz4.Option
 
-	// Used if not in workflow params. Default is
-	// DefaultRequestsUntilContinueAsNew.
+	// Number of requests until a continue-as-new is used to serialize and restart
+	// the workflow. This value is only used if not set in workflow params.
+	// Default is DefaultRequestsUntilContinueAsNew.
 	DefaultRequestsUntilContinueAsNew int
 
-	// If true, all queries and their successes are logged at debug level
+	// If true, all queries and their successes are logged at debug level.
 	LogQueries bool
 
-	// If true, all actions of each query are logged at debug level
+	// If true, all actions of each query are logged at debug level.
 	LogActions bool
 
+	// Called with the raw SQLite connection to allow custom initialization.
 	InitializeSqlite func(*sqlite.Conn) error
 
-	// Should be all lowercase. If empty, default is DefaultNonDeterministicFuncs.
+	// Set of non-deterministic functions to disallow execution of. Should be all
+	// lowercase. If empty, default is DefaultNonDeterministicFuncs.
 	NonDeterministicFuncs map[string]bool
 
 	// If true, errors from signal-based updates do not fail the workflow.
 	IgnoreUpdateErrors bool
 }
 
+// RegisterSqliteWorker registers the SQLite workflow with the given registry.
 func RegisterSqliteWorker(r worker.WorkflowRegistry, opts SqliteWorkerOptions) {
 	if opts.DefaultRequestsUntilContinueAsNew == 0 {
 		opts.DefaultRequestsUntilContinueAsNew = DefaultRequestsUntilContinueAsNew

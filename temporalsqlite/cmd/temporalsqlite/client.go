@@ -133,8 +133,7 @@ func (s *saveConfig) flags() []cli.Flag {
 	return append(s.clientConfig.flags(),
 		&cli.StringFlag{
 			Name:        "file",
-			Usage:       "File to put DB at",
-			Value:       "sqlite.db",
+			Usage:       "File to put DB at (default: <dbname>.db)",
 			Destination: &s.file,
 		},
 	)
@@ -176,6 +175,9 @@ func saveCmd() *cli.Command {
 			defer conn.Close()
 			if err := conn.Deserialize(sqlite.NewSerialized("", b, false)); err != nil {
 				return err
+			}
+			if config.file == "" {
+				config.file = config.db + ".db"
 			}
 			dstConn, err := conn.BackupToDB("", config.file)
 			if err != nil {

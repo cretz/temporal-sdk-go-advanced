@@ -15,6 +15,7 @@ func main() {
 }
 
 var app = &cli.App{
+	Usage: "Temporal SQLite utilities",
 	Commands: []*cli.Command{
 		workerCmd(),
 		getOrCreateCmd(),

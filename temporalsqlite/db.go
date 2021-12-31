@@ -9,6 +9,8 @@ import (
 	"go.temporal.io/sdk/log"
 )
 
+// DefaultNonDeterministicFuncs is the default set of functions disallowed due
+// to inherit non-determinism.
 var DefaultNonDeterministicFuncs = map[string]bool{
 	"current_date":      true,
 	"current_time":      true,
@@ -16,8 +18,8 @@ var DefaultNonDeterministicFuncs = map[string]bool{
 	"random":            true,
 	"random_blob":       true,
 	// TODO(cretz): For datetime('now') and the like, we could replace the
-	// function with our own impl that forwarded to strftime _after_ confirming
-	// that "now" isn't used.
+	// function with our own impl that forwarded to our own impl of strftime
+	// _after_ confirming that "now" isn't used.
 }
 
 var allowedReadOnlyActions = map[sqlite.OpType]bool{
