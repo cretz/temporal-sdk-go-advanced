@@ -19,7 +19,16 @@ needs to recompile, interpret, etc.
 The approaches for external execution mode are not currently defined, but may incorporate any of the following:
 
 * IPC to communicate between a workflow process and the primary process
+  * This would be required for things like local activities to proxy using a pipe
+    * Would have to not use the `activity` package from an implementer POV, would need another package so you could
+      fork, say, a `RecordHeartbeat` back to workflow process if in local activity but use regular
+      `activity.RecordHeartbeat` for regular activities
+  * This is hard to do because Go does not have IPC for arbitrary calls. For example, what if you wanted to have a
+    generic logger on the primary process that used the actual `time.Now()` instead of whatever it was replaced with?
 * Inbound/outbound interceptor to proxy calls to/from the primary to the external
+  * This is not good enough because you can't create your own activity or workflow contexts. So say for instance you
+    wanted to start a local activity w/ a context that proxied all calls back to the workflow process. You cannot create
+    a context w/ public API that will invoke the interceptor.
 
 ### Deterministic Execution
 
@@ -36,7 +45,7 @@ TODO(cretz): Demonstrate
 
 Notes:
 
-* Go-to-WASM is deterministic as all WASM is (but imports called by WASM may not be)
+* Go-to-WASM is deterministic as all WASM basically is (but imports called by WASM may not be)
 * Regular `go` compiler:
   * Makes a lot of assumptions about running in JS environment so need an adapter
     * E.g. https://github.com/mattn/gowasmer and https://github.com/go-wasm-adapter/go-wasm
@@ -51,37 +60,37 @@ Notes:
 
 TODO(cretz): Demonstrate
 
-TODO(cretz): Notes
+TODO(cretz): Notes (too many bugs)
 
 #### golang.org/x/tools/go/ssa/interp Interpreter
 
 TODO(cretz): Demonstrate
 
-TODO(cretz): Notes
+TODO(cretz): Notes (does not even interpret `runtime` or others properly anymore)
 
 #### Custom Interpreter
 
 TODO(cretz): Demonstrate
 
-TODO(cretz): Notes
+TODO(cretz): Notes (lots of effort)
 
 #### Compile-time User Code Rewrite
 
 TODO(cretz): Demonstrate
 
-TODO(cretz): Notes
+TODO(cretz): Notes (lots of effort, see [sandboxworker/](sandboxworker))
 
 #### Compile-time Go Stdlib Code Rewrite
 
 TODO(cretz): Demonstrate
 
-TODO(cretz): Notes
+TODO(cretz): Notes (very brittle to change innards of maps/chans/etc)
 
 #### Go Fork
 
 TODO(cretz): Demonstrate
 
-TODO(cretz): Notes
+TODO(cretz): Notes (lots of effort)
 
 ### Non-determinism Checking
 
@@ -96,34 +105,34 @@ something).
 
 TODO(cretz): Demonstrate
 
-TODO(cretz): Notes
+TODO(cretz): Notes (I've done this before at https://github.com/cretz/temporal-determinist)
 
 #### Runtime Function Hooking + Goroutine Check
 
 TODO(cretz): Demonstrate
 
-TODO(cretz): Notes
+TODO(cretz): Notes (monkey patching function pointers at runtime brittle and still doesn't catch enough)
 
 #### eBPF Function Tracing + Goroutine Check
 
 TODO(cretz): Demonstrate
 
-TODO(cretz): Notes
+TODO(cretz): Notes (not sure this can catch non-determinism from global variable mutation)
 
 #### Compile-time Function Tracepoints + Goroutine Check
 
 TODO(cretz): Demonstrate
 
-TODO(cretz): Notes
+TODO(cretz): Notes (doesn't catch everything, see [tracecompile/](tracecompile))
 
 #### Debugger Breakpoints + Goroutine Check
 
 TODO(cretz): Demonstrate
 
-TODO(cretz): Notes
+TODO(cretz): Notes (needs separate process, slow, may not be able to catch global var mutation)
 
 #### Fuzz/Coverage Replay Tracing
 
 TODO(cretz): Demonstrate
 
-TODO(cretz): Notes
+TODO(cretz): Notes (gonna add fuzzing in [another place](../temporaltest))
